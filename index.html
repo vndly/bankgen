@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Banking test data</title>
+    <style>
+        :root {
+            color-scheme: light;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 24px;
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: #f5f6f8;
+            color: #1c2330;
+        }
+
+        section {
+            margin-bottom: 32px;
+        }
+
+        h2 {
+            font-size: 16px;
+            margin: 0 0 12px;
+            text-align: center;
+        }
+
+        .columns {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(max-content, 1fr));
+            align-items: start;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #e4e7ec;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .sections-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .country-header {
+            text-align: center;
+            margin-bottom: 4px;
+        }
+
+        .flag {
+            display: block;
+            font-size: 26px;
+            line-height: 1.2;
+        }
+
+        .country-select {
+            width: 100%;
+            padding: 4px 6px;
+            border: 1px solid #e4e7ec;
+            border-radius: 6px;
+            background: #fff;
+            font-size: 13px;
+            color: inherit;
+        }
+
+        .group-title {
+            margin: 10px 0 4px;
+            text-align: center;
+            font-size: 10.5px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #98a2b3;
+        }
+
+        .value {
+            display: block;
+            width: fit-content;
+            margin: 0 auto;
+            padding: 3px 0;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 15px;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+
+        .value:hover {
+            background: #eef4ff;
+        }
+
+        .value.copied {
+            background: #d1fadf;
+        }
+
+        #toast {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translate(-50%, 8px);
+            padding: 8px 14px;
+            border-radius: 6px;
+            background: #1c2330;
+            color: #fff;
+            font-size: 12.5px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+    </style>
+</head>
+
+<body>
+    <section id="ibans">
+        <h2>IBANs</h2>
+        <div class="columns" id="iban-grid"></div>
+    </section>
+
+    <div class="sections-row">
+        <section id="qr-references">
+            <h2>QR references</h2>
+            <div class="card" id="qr-list"></div>
+        </section>
+
+        <section id="scor-references">
+            <h2>SCOR references</h2>
+            <div class="card" id="scor-list"></div>
+        </section>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        "use strict";
+
+        // --- random helpers ---
+
+        const IBANS_PER_GROUP = 3;
+        const REFS_PER_GROUP = 5;
+        const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+        const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+        const randDigits = (n) => Array.from({ length: n }, () => randInt(0, 9)).join("");
+        const randLetter = () => LETTERS[randInt(0, 25)];
+        const randAlnum = () => ("0123456789" + LETTERS)[randInt(0, 35)];
+        const randLetters = (n) => Array.from({ length: n }, randLetter).join("");
+        const pick = (list) => list[randInt(0, list.length - 1)];
+        // 0x1f1a5 = regional indicator "A" (0x1f1e6) minus "A".charCodeAt(0), so each
+        // letter maps to its flag-emoji code point.
+        const flagOf = (code) => String.fromCodePoint(...[...code].map((c) => 0x1f1a5 + c.charCodeAt(0)));
+
+        // --- IBAN building blocks ---
+
+        // ISO 7064 mod 97-10 over an alphanumeric string (A=10 ... Z=35).
+        function mod97(input) {
+            let rem = 0;
+            for (const ch of input) {
+                const expanded = ch >= "0" && ch <= "9" ? ch : String(ch.charCodeAt(0) - 55);
+                for (const d of expanded) rem = (rem * 10 + (d.charCodeAt(0) - 48)) % 97;
+            }
+            return rem;
+        }
+
+        function withCheckDigits(country, bban) {
+            const check = 98 - mod97(bban + country + "00");
+            return country + String(check).padStart(2, "0") + bban;
+        }
+
+        // QR-IIDs are 30000-31999 (Swiss QR-bill spec). Outside CH the concept does not
+        // exist, so the range is applied to the country's leading numeric field (bank
+        // code, sort code or account), truncated/extended to its length (e.g. 300-319
+        // for 3 digits, 30000x-31999x for 6+). Non-QR codes explicitly avoid that
+        // range so the two groups never overlap.
+        const QR_IID_MIN = 30000;
+        const QR_IID_MAX = 31999;
+
+        function isQrLike(code) {
+            const headLen = Math.min(code.length, 5);
+            const head = Number(code.slice(0, headLen));
+            const scale = 10 ** (5 - headLen);
+            return head >= Math.floor(QR_IID_MIN / scale) && head <= Math.floor(QR_IID_MAX / scale);
+        }
+
+        function numericCode(length, qr) {
+            if (qr) {
+                const iid = String(randInt(QR_IID_MIN, QR_IID_MAX));
+                return length <= 5 ? iid.slice(0, length) : iid + randDigits(length - 5);
+            }
+            let code;
+            do {
+                code = randDigits(length);
+            } while (isQrLike(code));
+            return code;
+        }
+
+        // --- national check digits ---
+
+        // French RIB key: bank || branch || account || key must be ≡ 0 (mod 97).
+        function frRibKey(bank, branch, account) {
+            const rem = (89n * BigInt(bank) + 15n * BigInt(branch) + 3n * BigInt(account)) % 97n;
+            return String(97 - Number(rem)).padStart(2, "0");
+        }
+
+        // Spanish dígito de control over a 10-digit block.
+        function esCheckDigit(digits) {
+            const weights = [1, 2, 4, 8, 5, 10, 9, 7, 3, 6];
+            let sum = 0;
+            for (let i = 0; i < 10; i++) sum += Number(digits[i]) * weights[i];
+            const r = 11 - (sum % 11);
+            return r === 11 ? 0 : r === 10 ? 1 : r;
+        }
+
+        const esControl = (bank, branch, account) =>
+            `${esCheckDigit("00" + bank + branch)}${esCheckDigit(account)}`;
+
+        // Italian CIN over ABI + CAB + account (22 digits).
+        const IT_CIN_ODD = [1, 0, 5, 7, 9, 13, 15, 17, 19, 21];
+
+        function itCin(digits) {
+            let sum = 0;
+            for (let i = 0; i < 22; i++) {
+                const d = Number(digits[i]);
+                sum += i % 2 === 0 ? IT_CIN_ODD[d] : d;
+            }
+            return String.fromCharCode(65 + (sum % 26));
+        }
+
+        // --- per-country generators (formats per the official IBAN registry) ---
+
+        const GB_BANK_CODES = ["BARC", "NWBK", "LOYD", "HBUK", "MIDL", "ABBY", "RBOS", "BUKB", "HLFX", "CITI"];
+
+        const countries = [
+            {
+                code: "CH", name: "Switzerland",
+                gen(qr) {
+                    return withCheckDigits("CH", numericCode(5, qr) + randDigits(12));
+                },
+            },
+            {
+                code: "FR", name: "France",
+                gen(qr) {
+                    const bank = numericCode(5, qr);
+                    const branch = randDigits(5);
+                    const account = randDigits(11);
+                    return withCheckDigits("FR", bank + branch + account + frRibKey(bank, branch, account));
+                },
+            },
+            {
+                code: "DE", name: "Germany",
+                gen(qr) {
+                    return withCheckDigits("DE", numericCode(8, qr) + randDigits(10));
+                },
+            },
+            {
+                code: "ES", name: "Spain",
+                gen(qr) {
+                    const bank = numericCode(4, qr);
+                    const branch = randDigits(4);
+                    const account = randDigits(10);
+                    return withCheckDigits("ES", bank + branch + esControl(bank, branch, account) + account);
+                },
+            },
+            {
+                code: "IT", name: "Italy",
+                gen(qr) {
+                    const bban = numericCode(5, qr) + randDigits(5) + randDigits(12);
+                    return withCheckDigits("IT", itCin(bban) + bban);
+                },
+            },
+            {
+                code: "BR", name: "Brazil",
+                gen(qr) {
+                    return withCheckDigits("BR", numericCode(8, qr) + randDigits(5) + randDigits(10) + randLetter() + randAlnum());
+                },
+            },
+            {
+                code: "TR", name: "Turkey",
+                gen(qr) {
+                    return withCheckDigits("TR", numericCode(5, qr) + "0" + randDigits(16));
+                },
+            },
+            {
+                code: "AE", name: "United Arab Emirates",
+                gen(qr) {
+                    return withCheckDigits("AE", numericCode(3, qr) + randDigits(16));
+                },
+            },
+            {
+                code: "GB", name: "United Kingdom",
+                gen(qr) {
+                    return withCheckDigits("GB", pick(GB_BANK_CODES) + numericCode(6, qr) + randDigits(8));
+                },
+            },
+        ];
+
+        // --- generic generator (any IBAN country) ---
+
+        // All countries in the SWIFT IBAN registry: [code, name, BBAN spec]. Spec
+        // segments are <length><type> with n = digits, a = letters, c = alphanumeric
+        // (generated as digits here). Countries with a dedicated generator above are
+        // routed through it; for the rest, national check digits are random, so those
+        // IBANs are structure- and mod-97-valid only.
+        const IBAN_REGISTRY = [
+            ["AD", "Andorra", "4n4n12c"],
+            ["AE", "United Arab Emirates", "3n16n"],
+            ["AL", "Albania", "8n16c"],
+            ["AT", "Austria", "5n11n"],
+            ["AZ", "Azerbaijan", "4a20c"],
+            ["BA", "Bosnia and Herzegovina", "3n3n8n2n"],
+            ["BE", "Belgium", "3n7n2n"],
+            ["BG", "Bulgaria", "4a4n2n8c"],
+            ["BH", "Bahrain", "4a14c"],
+            ["BI", "Burundi", "5n5n11n2n"],
+            ["BR", "Brazil", "8n5n10n1a1c"],
+            ["BY", "Belarus", "4c4n16c"],
+            ["CH", "Switzerland", "5n12c"],
+            ["CR", "Costa Rica", "4n14n"],
+            ["CY", "Cyprus", "3n5n16c"],
+            ["CZ", "Czech Republic", "4n6n10n"],
+            ["DE", "Germany", "8n10n"],
+            ["DJ", "Djibouti", "5n5n11n2n"],
+            ["DK", "Denmark", "4n9n1n"],
+            ["DO", "Dominican Republic", "4c20n"],
+            ["EE", "Estonia", "2n2n11n1n"],
+            ["EG", "Egypt", "4n4n17n"],
+            ["ES", "Spain", "4n4n2n10n"],
+            ["FI", "Finland", "3n11n"],
+            ["FK", "Falkland Islands", "2a12n"],
+            ["FO", "Faroe Islands", "4n9n1n"],
+            ["FR", "France", "5n5n11c2n"],
+            ["GB", "United Kingdom", "4a6n8n"],
+            ["GE", "Georgia", "2a16n"],
+            ["GI", "Gibraltar", "4a15c"],
+            ["GL", "Greenland", "4n9n1n"],
+            ["GR", "Greece", "3n4n16c"],
+            ["GT", "Guatemala", "4c20c"],
+            ["HN", "Honduras", "4a20n"],
+            ["HR", "Croatia", "7n10n"],
+            ["HU", "Hungary", "3n4n1n15n1n"],
+            ["IE", "Ireland", "4a6n8n"],
+            ["IL", "Israel", "3n3n13n"],
+            ["IQ", "Iraq", "4a3n12n"],
+            ["IS", "Iceland", "4n2n6n10n"],
+            ["IT", "Italy", "1a5n5n12c"],
+            ["JO", "Jordan", "4a4n18c"],
+            ["KW", "Kuwait", "4a22c"],
+            ["KZ", "Kazakhstan", "3n13c"],
+            ["LB", "Lebanon", "4n20c"],
+            ["LC", "Saint Lucia", "4a24c"],
+            ["LI", "Liechtenstein", "5n12c"],
+            ["LT", "Lithuania", "5n11n"],
+            ["LU", "Luxembourg", "3n13c"],
+            ["LV", "Latvia", "4a13c"],
+            ["LY", "Libya", "3n3n15n"],
+            ["MC", "Monaco", "5n5n11c2n"],
+            ["MD", "Moldova", "2c18c"],
+            ["ME", "Montenegro", "3n13n2n"],
+            ["MK", "North Macedonia", "3n10c2n"],
+            ["MN", "Mongolia", "4n12n"],
+            ["MR", "Mauritania", "5n5n11n2n"],
+            ["MT", "Malta", "4a5n18c"],
+            ["MU", "Mauritius", "4a2n2n12n3n3a"],
+            ["NI", "Nicaragua", "4a20n"],
+            ["NL", "Netherlands", "4a10n"],
+            ["NO", "Norway", "4n6n1n"],
+            ["OM", "Oman", "3n16c"],
+            ["PK", "Pakistan", "4a16c"],
+            ["PL", "Poland", "8n16n"],
+            ["PS", "Palestine", "4a21c"],
+            ["PT", "Portugal", "4n4n11n2n"],
+            ["QA", "Qatar", "4a21c"],
+            ["RO", "Romania", "4a16c"],
+            ["RS", "Serbia", "3n13n2n"],
+            ["RU", "Russia", "9n5n15c"],
+            ["SA", "Saudi Arabia", "2n18c"],
+            ["SC", "Seychelles", "4a2n2n16n3a"],
+            ["SD", "Sudan", "2n12n"],
+            ["SE", "Sweden", "3n16n1n"],
+            ["SI", "Slovenia", "5n8n2n"],
+            ["SK", "Slovakia", "4n6n10n"],
+            ["SM", "San Marino", "1a5n5n12c"],
+            ["SO", "Somalia", "4n3n12n"],
+            ["ST", "São Tomé and Príncipe", "8n11n2n"],
+            ["SV", "El Salvador", "4a20n"],
+            ["TL", "Timor-Leste", "3n14n2n"],
+            ["TN", "Tunisia", "2n3n13n2n"],
+            ["TR", "Turkey", "5n1n16c"],
+            ["UA", "Ukraine", "6n19c"],
+            ["VA", "Vatican City", "3n15n"],
+            ["VG", "British Virgin Islands", "4a16n"],
+            ["XK", "Kosovo", "4n10n2n"],
+            ["YE", "Yemen", "4a4n18c"],
+        ];
+
+        function genericIban(code) {
+            const fixed = countries.find((country) => country.code === code);
+            if (fixed) return fixed.gen(false);
+            const spec = IBAN_REGISTRY.find((entry) => entry[0] === code)[2];
+            let bban = "";
+            for (const [, count, type] of spec.matchAll(/(\d+)([nac])/g)) {
+                bban += type === "a" ? randLetters(Number(count)) : randDigits(Number(count));
+            }
+            return withCheckDigits(code, bban);
+        }
+
+        // --- BIC / SWIFT codes ---
+
+        // ISO 9362: 4!a bank code + 2!a country + 2!c location + optional 3!c branch.
+        // The location code avoids 0 and 1 (test / not-connected markers), and a
+        // branch other than the head-office "XXX" must not start with X.
+        const BIC_LOCATION_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789";
+        const BIC_BRANCH_FIRST_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWYZ";
+
+        function genBic(countryCode) {
+            const location = pick(BIC_LOCATION_CHARS) + pick(BIC_LOCATION_CHARS);
+            const roll = randInt(0, 3);
+            const branch =
+                roll <= 1 ? "" : roll === 2 ? "XXX" : pick(BIC_BRANCH_FIRST_CHARS) + randAlnum() + randAlnum();
+            return randLetters(4) + countryCode + location + branch;
+        }
+
+        // --- payment references ---
+
+        // Swiss QR reference: 26 random digits + recursive mod-10 check digit.
+        const MOD10_TABLE = [0, 9, 4, 6, 8, 2, 7, 1, 3, 5];
+
+        function mod10CheckDigit(digits) {
+            let carry = 0;
+            for (const d of digits) carry = MOD10_TABLE[(carry + d.charCodeAt(0) - 48) % 10];
+            return String((10 - carry) % 10);
+        }
+
+        function genQrReference() {
+            const body = randDigits(26);
+            return body + mod10CheckDigit(body);
+        }
+
+        // SCOR / ISO 11649 creditor reference: "RF" + mod-97 check digits + body
+        // (5-21 digits here; the spec allows up to 21 alphanumeric characters).
+        function genScorReference() {
+            const body = randDigits(randInt(5, 21));
+            return "RF" + String(98 - mod97(body + "RF00")).padStart(2, "0") + body;
+        }
+
+        // --- rendering ---
+
+        function render() {
+            const values = (country, qr) =>
+                Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${country.gen(qr)}</code>`).join("");
+
+            const bics = (country) =>
+                Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${genBic(country.code)}</code>`).join("");
+
+            document.getElementById("iban-grid").innerHTML = countries
+                .map(
+                    (country) => `
+      <div class="card">
+        <div class="country-header">
+          <span class="flag">${flagOf(country.code)}</span>
+        </div>
+        <div class="group-title">IBAN</div>
+        ${values(country, false)}
+        <div class="group-title">QR-IBAN</div>
+        ${values(country, true)}
+        <div class="group-title">BIC/SWIFT</div>
+        ${bics(country)}
+      </div>`
+                )
+                .join("") + genericCardHtml();
+
+            const refs = (gen) =>
+                Array.from({ length: REFS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
+
+            document.getElementById("qr-list").innerHTML = refs(genQrReference);
+            document.getElementById("scor-list").innerHTML = refs(genScorReference);
+        }
+
+        function genericCardHtml() {
+            const options = [...IBAN_REGISTRY]
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map(([code, name]) => `<option value="${code}">${flagOf(code)} ${name}</option>`)
+                .join("");
+            return `
+      <div class="card">
+        <div class="country-header">
+          <select id="country-select" class="country-select">
+            <option value="" selected disabled>Select a country…</option>
+            ${options}
+          </select>
+        </div>
+        <div id="generic-ibans"></div>
+      </div>`;
+        }
+
+        function renderGenericIbans(code) {
+            const items = (gen) =>
+                Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
+            document.getElementById("generic-ibans").innerHTML =
+                `<div class="group-title">IBAN</div>` + items(() => genericIban(code)) +
+                `<div class="group-title">BIC/SWIFT</div>` + items(() => genBic(code));
+        }
+
+        async function copyText(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch {
+                const textarea = document.createElement("textarea");
+                textarea.value = text;
+                textarea.style.cssText = "position: fixed; opacity: 0";
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand("copy");
+                textarea.remove();
+            }
+        }
+
+        let toastTimer;
+        function showToast(message) {
+            const toast = document.getElementById("toast");
+            toast.textContent = message;
+            toast.classList.add("show");
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove("show"), 1500);
+        }
+
+        if (typeof document !== "undefined") {
+            render();
+            document.body.addEventListener("click", (event) => {
+                const value = event.target.closest("code.value");
+                if (!value) return;
+                copyText(value.textContent);
+                showToast(`Copied ${value.textContent}`);
+                value.classList.add("copied");
+                setTimeout(() => value.classList.remove("copied"), 700);
+            });
+            document.body.addEventListener("change", (event) => {
+                if (event.target.id === "country-select") renderGenericIbans(event.target.value);
+            });
+        }
+    </script>
+</body>
+
+</html>
