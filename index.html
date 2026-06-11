@@ -45,13 +45,19 @@
             background: #fff;
             border: 1px solid #e4e7ec;
             border-radius: 8px;
-            padding: 10px;
+            padding: 10px 16px;
         }
 
         .sections-row {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(2, max-content);
+            justify-content: center;
             gap: 10px;
+        }
+
+        .sections-row .card {
+            padding-left: 32px;
+            padding-right: 32px;
         }
 
         .country-header {
@@ -89,6 +95,7 @@
 
         .value {
             display: block;
+            position: relative;
             width: fit-content;
             margin: 0 auto;
             padding: 3px 0;
@@ -110,7 +117,8 @@
 
         .value.copied::after {
             content: "✓";
-            margin-left: 6px;
+            position: absolute;
+            left: calc(100% + 6px);
             color: #12b76a;
         }
 
