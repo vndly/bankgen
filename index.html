@@ -314,11 +314,11 @@
             return body + check;
         }
 
-        // BBAN ≡ 1 (mod 97), ISO 7064 MOD 97-10: PT, RS, ME, MK, BA, TL.
+        // BBAN ≡ 1 (mod 97), ISO 7064 MOD 97-10: PT, RS, ME, MK, BA, TL, SI, ST, XK.
         const fix9710 = (bban) => bban.slice(0, -2) + String(98 - mod97(bban.slice(0, -2) + "00")).padStart(2, "0");
         const ok9710 = (bban) => mod97(bban) === 1;
 
-        // BBAN ≡ 0 (mod 97), French RIB key family: FR, MC, MR, TN. Digits only —
+        // BBAN ≡ 0 (mod 97), French RIB key family: FR, MC, MR, TN, BI, DJ. Digits only —
         // the RIB letter-to-digit table is not implemented since we never generate
         // letters in these accounts.
         const fixRib = (bban) => bban.slice(0, -2) + String(97 - mod97(bban.slice(0, -2) + "00")).padStart(2, "0");
@@ -341,12 +341,17 @@
             MC: { fix: fixRib, ok: okRib },
             MR: { fix: fixRib, ok: okRib },
             TN: { fix: fixRib, ok: okRib },
+            BI: { fix: fixRib, ok: okRib },
+            DJ: { fix: fixRib, ok: okRib },
             PT: { fix: fix9710, ok: ok9710 },
             RS: { fix: fix9710, ok: ok9710 },
             ME: { fix: fix9710, ok: ok9710 },
             MK: { fix: fix9710, ok: ok9710 },
             BA: { fix: fix9710, ok: ok9710 },
             TL: { fix: fix9710, ok: ok9710 },
+            SI: { fix: fix9710, ok: ok9710 },
+            ST: { fix: fix9710, ok: ok9710 },
+            XK: { fix: fix9710, ok: ok9710 },
             IT: { fix: fixItCin, ok: okItCin },
             SM: { fix: fixItCin, ok: okItCin },
             CZ: czskNational,

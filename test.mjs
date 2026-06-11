@@ -103,8 +103,8 @@ const BACKEND_BIC_REGEX =
 const qrIid = (iban) => Number(iban.slice(4, 9));
 const inQrRange = (iban) => qrIid(iban) >= 30000 && qrIid(iban) <= 31999;
 
-const RIB_FAMILY = new Set(["FR", "MC", "MR", "TN"]); // BBAN ≡ 0 (mod 97)
-const M9710_FAMILY = new Set(["PT", "RS", "ME", "MK", "BA", "TL"]); // BBAN ≡ 1 (mod 97)
+const RIB_FAMILY = new Set(["FR", "MC", "MR", "TN", "BI", "DJ"]); // BBAN ≡ 0 (mod 97)
+const M9710_FAMILY = new Set(["PT", "RS", "ME", "MK", "BA", "TL", "SI", "ST", "XK"]); // BBAN ≡ 1 (mod 97)
 
 function noNationalValid(bban) {
   const w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
@@ -227,9 +227,16 @@ const NATIONAL_EXAMPLES = {
   ME: "ME25505000012345678951",
   BA: "BA391290079401028494",
   TL: "TL380080012345678910157",
+  SI: "SI56263300012039086",
+  // The registry's own ST example (ST68...) fails even ISO mod-97; this is the
+  // corrected one (also on iban.com). Some registry mirrors still carry ST68.
+  ST: "ST23000200000289355710148",
+  XK: "XK051212012345678906",
   MC: "MC5811222000010123456789030",
   MR: "MR1300020001010000123456753",
   TN: "TN5910006035183598478831",
+  BI: "BI4210000100010000332045181",
+  DJ: "DJ2100010000000154000100186",
   SM: "SM86U0322509800000000270100",
   IT: "IT60X0542811101000000123456",
   ES: "ES9121000418450200051332",
