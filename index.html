@@ -50,7 +50,7 @@
 
         .sections-row {
             display: grid;
-            grid-template-columns: repeat(2, max-content);
+            grid-template-columns: repeat(3, max-content);
             justify-content: center;
             gap: 10px;
         }
@@ -151,6 +151,11 @@
     </section>
 
     <div class="sections-row">
+        <section id="qr-ibans">
+            <h2>QR-IBANs</h2>
+            <div class="card" id="qr-iban-list"></div>
+        </section>
+
         <section id="qr-references">
             <h2>QR references</h2>
             <div class="card" id="qr-list"></div>
@@ -200,11 +205,9 @@
             return country + String(check).padStart(2, "0") + bban;
         }
 
-        // QR-IIDs are 30000-31999 (Swiss QR-bill spec). Outside CH the concept does not
-        // exist, so the range is applied to the country's leading numeric field (bank
-        // code, sort code or account), truncated/extended to its length (e.g. 300-319
-        // for 3 digits, 30000x-31999x for 6+). Non-QR codes explicitly avoid that
-        // range so the two groups never overlap.
+        // QR-IIDs are 30000-31999 (Swiss QR-bill spec): a QR-IBAN is a CH IBAN whose
+        // IID falls in that range. Normal CH IBANs explicitly avoid it so the two
+        // groups never overlap.
         const QR_IID_MIN = 30000;
         const QR_IID_MAX = 31999;
 
@@ -272,8 +275,8 @@
             },
             {
                 code: "FR", name: "France",
-                gen(qr) {
-                    const bank = numericCode(5, qr);
+                gen() {
+                    const bank = randDigits(5);
                     const branch = randDigits(5);
                     const account = randDigits(11);
                     return withCheckDigits("FR", bank + branch + account + frRibKey(bank, branch, account));
@@ -281,14 +284,14 @@
             },
             {
                 code: "DE", name: "Germany",
-                gen(qr) {
-                    return withCheckDigits("DE", numericCode(8, qr) + randDigits(10));
+                gen() {
+                    return withCheckDigits("DE", randDigits(8) + randDigits(10));
                 },
             },
             {
                 code: "ES", name: "Spain",
-                gen(qr) {
-                    const bank = numericCode(4, qr);
+                gen() {
+                    const bank = randDigits(4);
                     const branch = randDigits(4);
                     const account = randDigits(10);
                     return withCheckDigits("ES", bank + branch + esControl(bank, branch, account) + account);
@@ -296,33 +299,33 @@
             },
             {
                 code: "IT", name: "Italy",
-                gen(qr) {
-                    const bban = numericCode(5, qr) + randDigits(5) + randDigits(12);
+                gen() {
+                    const bban = randDigits(5) + randDigits(5) + randDigits(12);
                     return withCheckDigits("IT", itCin(bban) + bban);
                 },
             },
             {
                 code: "BR", name: "Brazil",
-                gen(qr) {
-                    return withCheckDigits("BR", numericCode(8, qr) + randDigits(5) + randDigits(10) + randLetter() + randAlnum());
+                gen() {
+                    return withCheckDigits("BR", randDigits(8) + randDigits(5) + randDigits(10) + randLetter() + randAlnum());
                 },
             },
             {
                 code: "TR", name: "Turkey",
-                gen(qr) {
-                    return withCheckDigits("TR", numericCode(5, qr) + "0" + randDigits(16));
+                gen() {
+                    return withCheckDigits("TR", randDigits(5) + "0" + randDigits(16));
                 },
             },
             {
                 code: "AE", name: "United Arab Emirates",
-                gen(qr) {
-                    return withCheckDigits("AE", numericCode(3, qr) + randDigits(16));
+                gen() {
+                    return withCheckDigits("AE", randDigits(3) + randDigits(16));
                 },
             },
             {
                 code: "GB", name: "United Kingdom",
-                gen(qr) {
-                    return withCheckDigits("GB", pick(GB_BANK_CODES) + numericCode(6, qr) + randDigits(8));
+                gen() {
+                    return withCheckDigits("GB", pick(GB_BANK_CODES) + randDigits(6) + randDigits(8));
                 },
             },
         ];
@@ -426,21 +429,13 @@
             ["YE", "Yemen", "4a4n18c"],
         ];
 
-        function genericIban(code, qr) {
+        function genericIban(code) {
             const fixed = countries.find((country) => country.code === code);
-            if (fixed) return fixed.gen(qr);
+            if (fixed) return fixed.gen();
             const spec = IBAN_REGISTRY.find((entry) => entry[0] === code)[2];
             let bban = "";
-            let leadingNumericDone = false;
             for (const [, count, type] of spec.matchAll(/(\d+)([nac])/g)) {
-                if (type === "a") {
-                    bban += randLetters(Number(count));
-                } else if (leadingNumericDone) {
-                    bban += randDigits(Number(count));
-                } else {
-                    bban += numericCode(Number(count), qr);
-                    leadingNumericDone = true;
-                }
+                bban += type === "a" ? randLetters(Number(count)) : randDigits(Number(count));
             }
             return withCheckDigits(code, bban);
         }
@@ -502,13 +497,14 @@
         </div>
         <div class="group-title">IBAN</div>
         ${values(country, false)}
-        <div class="group-title">QR-IBAN</div>
-        ${values(country, true)}
         <div class="group-title">BIC/SWIFT</div>
         ${bics(country)}
       </div>`
                 )
                 .join("") + genericCardHtml();
+
+            document.getElementById("qr-iban-list").innerHTML =
+                values(countries.find((country) => country.code === "CH"), true);
 
             const refs = (gen) =>
                 Array.from({ length: REFS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
@@ -538,8 +534,7 @@
             const items = (gen) =>
                 Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
             document.getElementById("generic-ibans").innerHTML =
-                `<div class="group-title">IBAN</div>` + items(() => genericIban(code, false)) +
-                `<div class="group-title">QR-IBAN</div>` + items(() => genericIban(code, true)) +
+                `<div class="group-title">IBAN</div>` + items(() => genericIban(code)) +
                 `<div class="group-title">BIC/SWIFT</div>` + items(() => genBic(code));
         }
 
