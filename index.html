@@ -5,7 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Bankgen</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>">
     <style>
         :root {
             color-scheme: light;
@@ -23,7 +24,7 @@
             color: #1c2330;
         }
 
-        section {
+        #ibans {
             margin-bottom: 32px;
         }
 
@@ -174,8 +175,8 @@
 
         // --- random helpers ---
 
-        const IBANS_PER_GROUP = 3;
-        const REFS_PER_GROUP = 3;
+        const IBANS_PER_GROUP = 5;
+        const REFS_PER_GROUP = 5;
         const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
         const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -289,19 +290,19 @@
                 },
             },
             {
+                code: "IT", name: "Italy",
+                gen() {
+                    const bban = randDigits(5) + randDigits(5) + randDigits(12);
+                    return withCheckDigits("IT", itCin(bban) + bban);
+                },
+            },
+            {
                 code: "ES", name: "Spain",
                 gen() {
                     const bank = randDigits(4);
                     const branch = randDigits(4);
                     const account = randDigits(10);
                     return withCheckDigits("ES", bank + branch + esControl(bank, branch, account) + account);
-                },
-            },
-            {
-                code: "IT", name: "Italy",
-                gen() {
-                    const bban = randDigits(5) + randDigits(5) + randDigits(12);
-                    return withCheckDigits("IT", itCin(bban) + bban);
                 },
             },
             {
