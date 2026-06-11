@@ -36,7 +36,6 @@
         .columns {
             display: grid;
             grid-template-columns: repeat(5, minmax(max-content, 1fr));
-            align-items: start;
             gap: 10px;
             overflow-x: auto;
             padding-bottom: 8px;
@@ -93,10 +92,10 @@
             padding: 3px 0;
             border-radius: 4px;
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 15px;
+            font-size: 14px;
             white-space: nowrap;
             cursor: pointer;
-            transition: background-color 0.15s;
+            transition: background-color 0.15s, color 0.15s;
         }
 
         .value:hover {
@@ -104,7 +103,13 @@
         }
 
         .value.copied {
-            background: #d1fadf;
+            color: #98a2b3;
+        }
+
+        .value.copied::after {
+            content: "✓";
+            margin-left: 6px;
+            color: #12b76a;
         }
 
         #toast {
@@ -411,13 +416,21 @@
             ["YE", "Yemen", "4a4n18c"],
         ];
 
-        function genericIban(code) {
+        function genericIban(code, qr) {
             const fixed = countries.find((country) => country.code === code);
-            if (fixed) return fixed.gen(false);
+            if (fixed) return fixed.gen(qr);
             const spec = IBAN_REGISTRY.find((entry) => entry[0] === code)[2];
             let bban = "";
+            let leadingNumericDone = false;
             for (const [, count, type] of spec.matchAll(/(\d+)([nac])/g)) {
-                bban += type === "a" ? randLetters(Number(count)) : randDigits(Number(count));
+                if (type === "a") {
+                    bban += randLetters(Number(count));
+                } else if (leadingNumericDone) {
+                    bban += randDigits(Number(count));
+                } else {
+                    bban += numericCode(Number(count), qr);
+                    leadingNumericDone = true;
+                }
             }
             return withCheckDigits(code, bban);
         }
@@ -515,7 +528,8 @@
             const items = (gen) =>
                 Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
             document.getElementById("generic-ibans").innerHTML =
-                `<div class="group-title">IBAN</div>` + items(() => genericIban(code)) +
+                `<div class="group-title">IBAN</div>` + items(() => genericIban(code, false)) +
+                `<div class="group-title">QR-IBAN</div>` + items(() => genericIban(code, true)) +
                 `<div class="group-title">BIC/SWIFT</div>` + items(() => genBic(code));
         }
 
@@ -550,7 +564,6 @@
                 copyText(value.textContent);
                 showToast(`Copied ${value.textContent}`);
                 value.classList.add("copied");
-                setTimeout(() => value.classList.remove("copied"), 700);
             });
             document.body.addEventListener("change", (event) => {
                 if (event.target.id === "country-select") renderGenericIbans(event.target.value);
