@@ -268,6 +268,154 @@
             return String.fromCharCode(65 + (sum % 26));
         }
 
+        // National check digits for every registry country that defines a scheme.
+        // Each entry rewrites a randomly generated BBAN's check digits (fix) and
+        // verifies them (ok); all algorithms are anchored on the official registry
+        // example IBANs in test.mjs. Countries not listed have no national scheme
+        // (or, like DE, a per-bank one that cannot be implemented generically).
+
+        const wsumL = (s, w) => [...s].reduce((sum, ch, i) => sum + Number(ch) * w[i % w.length], 0);
+        const wsumR = (s, w) => wsumL([...s].reverse().join(""), w);
+        const mod10w = (s, w) => (10 - (wsumL(s, w) % 10)) % 10;
+        const setAt = (s, i, ch) => s.slice(0, i) + ch + s.slice(i + 1);
+
+        // Luhn (FI): double every second digit from the right.
+        function luhnCheckDigit(digits) {
+            let sum = 0;
+            [...digits].reverse().forEach((ch, i) => {
+                let d = Number(ch);
+                if (i % 2 === 0) {
+                    d *= 2;
+                    if (d > 9) d -= 9;
+                }
+                sum += d;
+            });
+            return (10 - (sum % 10)) % 10;
+        }
+
+        // ISO 7064 MOD 11,10 (HR).
+        function mod1110CheckDigit(digits) {
+            let p = 10;
+            for (const ch of digits) {
+                p = (p + Number(ch)) % 10 || 10;
+                p = (p * 2) % 11;
+            }
+            return (11 - p) % 10;
+        }
+
+        // MOD 11 field whose last digit has weight 1 (CZ/SK): a required check
+        // digit of 10 is impossible, so reroll the body until it fits.
+        function mod11Field(length, weights) {
+            let body, check;
+            do {
+                body = randDigits(length - 1);
+                check = (11 - (wsumL(body, weights) % 11)) % 11;
+            } while (check === 10);
+            return body + check;
+        }
+
+        // BBAN ≡ 1 (mod 97), ISO 7064 MOD 97-10: PT, RS, ME, MK, BA, TL.
+        const fix9710 = (bban) => bban.slice(0, -2) + String(98 - mod97(bban.slice(0, -2) + "00")).padStart(2, "0");
+        const ok9710 = (bban) => mod97(bban) === 1;
+
+        // BBAN ≡ 0 (mod 97), French RIB key family: FR, MC, MR, TN. Digits only —
+        // the RIB letter-to-digit table is not implemented since we never generate
+        // letters in these accounts.
+        const fixRib = (bban) => bban.slice(0, -2) + String(97 - mod97(bban.slice(0, -2) + "00")).padStart(2, "0");
+        const okRib = (bban) => mod97(bban) === 0;
+
+        const fixItCin = (bban) => itCin(bban.slice(1)) + bban.slice(1);
+        const okItCin = (bban) => bban[0] === itCin(bban.slice(1));
+
+        const czskNational = {
+            fix: (b) => b.slice(0, 4) + mod11Field(6, [10, 5, 8, 4, 2]) + mod11Field(10, [6, 3, 7, 9, 10, 5, 8, 4, 2]),
+            ok: (b) => wsumL(b.slice(4, 10), [10, 5, 8, 4, 2, 1]) % 11 === 0
+                && wsumL(b.slice(10), [6, 3, 7, 9, 10, 5, 8, 4, 2, 1]) % 11 === 0,
+        };
+
+        const NO_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+        const IS_WEIGHTS = [3, 2, 7, 6, 5, 4, 3, 2];
+
+        const NATIONAL = {
+            FR: { fix: fixRib, ok: okRib },
+            MC: { fix: fixRib, ok: okRib },
+            MR: { fix: fixRib, ok: okRib },
+            TN: { fix: fixRib, ok: okRib },
+            PT: { fix: fix9710, ok: ok9710 },
+            RS: { fix: fix9710, ok: ok9710 },
+            ME: { fix: fix9710, ok: ok9710 },
+            MK: { fix: fix9710, ok: ok9710 },
+            BA: { fix: fix9710, ok: ok9710 },
+            TL: { fix: fix9710, ok: ok9710 },
+            IT: { fix: fixItCin, ok: okItCin },
+            SM: { fix: fixItCin, ok: okItCin },
+            CZ: czskNational,
+            SK: czskNational,
+            ES: {
+                fix: (b) => b.slice(0, 8) + esControl(b.slice(0, 4), b.slice(4, 8), b.slice(10)) + b.slice(10),
+                ok: (b) => b.slice(8, 10) === esControl(b.slice(0, 4), b.slice(4, 8), b.slice(10)),
+            },
+            BE: {
+                // last two digits = first ten as a number mod 97 (0 becomes 97)
+                fix: (b) => b.slice(0, 10) + String(mod97(b.slice(0, 10)) || 97).padStart(2, "0"),
+                ok: (b) => b.slice(10) === String(mod97(b.slice(0, 10)) || 97).padStart(2, "0"),
+            },
+            NO: {
+                fix(b) {
+                    let body = b.slice(0, 10);
+                    let check;
+                    while ((check = (11 - (wsumL(body, NO_WEIGHTS) % 11)) % 11) === 10) body = randDigits(10);
+                    return body + check;
+                },
+                ok: (b) => Number(b[10]) === (11 - (wsumL(b.slice(0, 10), NO_WEIGHTS) % 11)) % 11,
+            },
+            FI: {
+                fix: (b) => b.slice(0, 13) + luhnCheckDigit(b.slice(0, 13)),
+                ok: (b) => Number(b[13]) === luhnCheckDigit(b.slice(0, 13)),
+            },
+            EE: {
+                // weights 7,3,1 from the right over branch + account (digits 2..14)
+                fix: (b) => b.slice(0, 15) + String((10 - (wsumR(b.slice(2, 15), [7, 3, 1]) % 10)) % 10),
+                ok: (b) => Number(b[15]) === (10 - (wsumR(b.slice(2, 15), [7, 3, 1]) % 10)) % 10,
+            },
+            PL: {
+                fix: (b) => setAt(b, 7, mod10w(b.slice(0, 7), [3, 9, 7, 1, 3, 9, 7])),
+                ok: (b) => Number(b[7]) === mod10w(b.slice(0, 7), [3, 9, 7, 1, 3, 9, 7]),
+            },
+            AL: {
+                fix: (b) => setAt(b, 7, mod10w(b.slice(0, 7), [9, 7, 3, 1])),
+                ok: (b) => Number(b[7]) === mod10w(b.slice(0, 7), [9, 7, 3, 1]),
+            },
+            HU: {
+                fix: (b) => setAt(setAt(b, 7, mod10w(b.slice(0, 7), [9, 7, 3, 1])), 23, mod10w(b.slice(8, 23), [9, 7, 3, 1])),
+                ok: (b) => Number(b[7]) === mod10w(b.slice(0, 7), [9, 7, 3, 1])
+                    && Number(b[23]) === mod10w(b.slice(8, 23), [9, 7, 3, 1]),
+            },
+            HR: {
+                fix: (b) => b.slice(0, 6) + mod1110CheckDigit(b.slice(0, 6)) + b.slice(7, 16) + mod1110CheckDigit(b.slice(7, 16)),
+                ok: (b) => Number(b[6]) === mod1110CheckDigit(b.slice(0, 6))
+                    && Number(b[16]) === mod1110CheckDigit(b.slice(7, 16)),
+            },
+            IS: {
+                // last 10 digits are a kennitala: DDMMYY + 2 digits + mod-11 check
+                // digit + century digit (8, 9 or 0)
+                fix(b) {
+                    const date = String(randInt(1, 28)).padStart(2, "0") + String(randInt(1, 12)).padStart(2, "0") + randDigits(2);
+                    let head, check;
+                    do {
+                        head = date + randDigits(2);
+                        check = (11 - (wsumL(head, IS_WEIGHTS) % 11)) % 11;
+                    } while (check === 10);
+                    return b.slice(0, 12) + head + check + pick("089");
+                },
+                ok(b) {
+                    const kennitala = b.slice(12);
+                    return Number(kennitala[8]) === (11 - (wsumL(kennitala.slice(0, 8), IS_WEIGHTS) % 11)) % 11
+                        && "089".includes(kennitala[9]);
+                },
+            },
+        };
+
         // --- per-country generators (formats per the official IBAN registry) ---
 
         const GB_BANK_CODES = ["BARC", "NWBK", "LOYD", "HBUK", "MIDL", "ABBY", "RBOS", "BUKB", "HLFX", "CITI"];
@@ -341,8 +489,8 @@
         // All countries in the SWIFT IBAN registry: [code, name, BBAN spec]. Spec
         // segments are <length><type> with n = digits, a = letters, c = alphanumeric
         // (generated as digits here). Countries with a dedicated generator above are
-        // routed through it; for the rest, national check digits are random, so those
-        // IBANs are structure- and mod-97-valid only.
+        // routed through it; the rest get random digits whose national check digits,
+        // where the country defines a scheme, are corrected afterwards (see NATIONAL).
         const IBAN_REGISTRY = [
             ["AD", "Andorra", "4n4n12c"],
             ["AE", "United Arab Emirates", "3n16n"],
@@ -445,6 +593,8 @@
             }
             // LI shares the Swiss QR-IID system, so keep its IBANs out of the QR range
             if (code === "LI") bban = numericCode(5, false) + bban.slice(5);
+            const national = NATIONAL[code];
+            if (national) bban = national.fix(bban);
             return withCheckDigits(code, bban);
         }
 
@@ -510,11 +660,8 @@
             // of canonical values and pass the checksum, so reject them explicitly.
             if (["00", "01", "99"].includes(iban.slice(2, 4))) return false;
             if (mod97(iban.slice(4) + iban.slice(0, 4)) !== 1) return false;
-            const bban = iban.slice(4);
-            if (iban.startsWith("FR")) return bban.slice(21) === frRibKey(bban.slice(0, 5), bban.slice(5, 10), bban.slice(10, 21));
-            if (iban.startsWith("ES")) return bban.slice(8, 10) === esControl(bban.slice(0, 4), bban.slice(4, 8), bban.slice(10));
-            if (iban.startsWith("IT")) return bban[0] === itCin(bban.slice(1));
-            return true;
+            const national = NATIONAL[iban.slice(0, 2)];
+            return national ? national.ok(iban.slice(4)) : true;
         }
 
         const isValidNormalIban = (iban) => isValidIban(iban) && !QR_IBAN_REGEX.test(iban);

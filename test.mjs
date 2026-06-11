@@ -103,6 +103,16 @@ const BACKEND_BIC_REGEX =
 const qrIid = (iban) => Number(iban.slice(4, 9));
 const inQrRange = (iban) => qrIid(iban) >= 30000 && qrIid(iban) <= 31999;
 
+const RIB_FAMILY = new Set(["FR", "MC", "MR", "TN"]); // BBAN ≡ 0 (mod 97)
+const M9710_FAMILY = new Set(["PT", "RS", "ME", "MK", "BA", "TL"]); // BBAN ≡ 1 (mod 97)
+
+function noNationalValid(bban) {
+  const w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  let sum = 0;
+  for (let i = 0; i < 10; i++) sum += Number(bban[i]) * w[i];
+  return Number(bban[10]) === (11 - (sum % 11)) % 11;
+}
+
 // --- published fixtures ---
 
 assert(
@@ -195,6 +205,54 @@ assert(
   "fixture: branch starting with X rejected",
 );
 
+// --- national checksum algorithms, anchored on official registry example IBANs ---
+// The FR example contains a letter (RIB letter conversion), which the
+// digits-only page validator deliberately does not support; checked separately.
+
+const NATIONAL_EXAMPLES = {
+  BE: "BE68539007547034",
+  NO: "NO9386011117947",
+  FI: "FI2112345600000785",
+  EE: "EE382200221020145685",
+  PL: "PL61109010140000071219812874",
+  HU: "HU42117730161111101800000000",
+  AL: "AL47212110090000000235698741",
+  CZ: "CZ6508000000192000145399",
+  SK: "SK3112000000198742637541",
+  HR: "HR1210010051863000160",
+  IS: "IS140159260076545510730339",
+  MK: "MK07250120000058984",
+  PT: "PT50000201231234567890154",
+  RS: "RS35260005601001611379",
+  ME: "ME25505000012345678951",
+  BA: "BA391290079401028494",
+  TL: "TL380080012345678910157",
+  MC: "MC5811222000010123456789030",
+  MR: "MR1300020001010000123456753",
+  TN: "TN5910006035183598478831",
+  SM: "SM86U0322509800000000270100",
+  IT: "IT60X0542811101000000123456",
+  ES: "ES9121000418450200051332",
+};
+for (const [cc, iban] of Object.entries(NATIONAL_EXAMPLES)) {
+  assert(bigIntMod97Is1(iban), `registry example mod-97 (${cc}): ${iban}`);
+  assert(api.isValidIban(iban), `registry example accepted (${cc}): ${iban}`);
+}
+{
+  const iban = "FR1420041010050500013M02606";
+  assert(bigIntMod97Is1(iban), `registry example mod-97 (FR): ${iban}`);
+  const RIB_LETTERS = "123456789123456789234567892345678".slice(0, 26); // A..Z
+  const converted = [...iban.slice(4)]
+    .map((ch) =>
+      ch >= "0" && ch <= "9" ? ch : RIB_LETTERS[ch.charCodeAt(0) - 65],
+    )
+    .join("");
+  assert(
+    BigInt(converted) % 97n === 0n,
+    `FR registry example RIB key: ${iban}`,
+  );
+}
+
 // --- IBANs: every registry country, generator output must satisfy both the
 // --- independent checks and the page validators ---
 
@@ -207,9 +265,19 @@ for (const [cc, , spec] of api.IBAN_REGISTRY) {
     assert(bigIntMod97Is1(iban), `${cc} mod-97: ${iban}`);
     assert(api.isValidNormalIban(iban), `${cc} page validator: ${iban}`);
     const bban = iban.slice(4);
-    if (cc === "FR") assert(frRibValid(bban), `FR RIB key: ${iban}`);
+    if (RIB_FAMILY.has(cc))
+      assert(frRibValid(bban), `${cc} RIB family key: ${iban}`);
+    if (M9710_FAMILY.has(cc))
+      assert(BigInt(bban) % 97n === 1n, `${cc} 97-10 national check: ${iban}`);
     if (cc === "ES") assert(esControlValid(bban), `ES control: ${iban}`);
-    if (cc === "IT") assert(itCinValid(bban), `IT CIN: ${iban}`);
+    if (cc === "IT" || cc === "SM")
+      assert(itCinValid(bban), `${cc} CIN: ${iban}`);
+    if (cc === "BE")
+      assert(
+        Number(bban.slice(10)) === (Number(bban.slice(0, 10)) % 97 || 97),
+        `BE national check: ${iban}`,
+      );
+    if (cc === "NO") assert(noNationalValid(bban), `NO national check: ${iban}`);
     if (cc === "CH" || cc === "LI")
       assert(!inQrRange(iban), `${cc} normal IBAN in QR-IID range: ${iban}`);
   }
