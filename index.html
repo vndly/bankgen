@@ -123,6 +123,11 @@
             color: #12b76a;
         }
 
+        .value.invalid {
+            background: #fee4e2;
+            color: #b42318;
+        }
+
         #toast {
             position: fixed;
             left: 50%;
@@ -438,19 +443,23 @@
             for (const [, count, type] of spec.matchAll(/(\d+)([nac])/g)) {
                 bban += type === "a" ? randLetters(Number(count)) : randDigits(Number(count));
             }
+            // LI shares the Swiss QR-IID system, so keep its IBANs out of the QR range
+            if (code === "LI") bban = numericCode(5, false) + bban.slice(5);
             return withCheckDigits(code, bban);
         }
 
         // --- BIC / SWIFT codes ---
 
         // ISO 9362: 4!a bank code + 2!a country + 2!c location + optional 3!c branch.
-        // The location code avoids 0 and 1 (test / not-connected markers), and a
-        // branch other than the head-office "XXX" must not start with X.
-        const BIC_LOCATION_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789";
+        // The location code avoids 0 and 1 (test / not-connected markers) and, in its
+        // second character, the letter O (SWIFT rule); a branch other than the
+        // head-office "XXX" must not start with X.
+        const BIC_LOCATION1_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789";
+        const BIC_LOCATION2_CHARS = "ABCDEFGHIJKLMNPQRSTUVWXYZ23456789";
         const BIC_BRANCH_FIRST_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWYZ";
 
         function genBic(countryCode) {
-            const location = pick(BIC_LOCATION_CHARS) + pick(BIC_LOCATION_CHARS);
+            const location = pick(BIC_LOCATION1_CHARS) + pick(BIC_LOCATION2_CHARS);
             const roll = randInt(0, 3);
             const branch =
                 roll <= 1 ? "" : roll === 2 ? "XXX" : pick(BIC_BRANCH_FIRST_CHARS) + randAlnum() + randAlnum();
@@ -480,14 +489,58 @@
             return "RF" + String(98 - mod97(body + "RF00")).padStart(2, "0") + body;
         }
 
+        // --- validators ---
+
+        // Every rendered value is checked against the strictest validation available:
+        // the backend's regexes (QR-IBAN, BIC), the IBAN registry (structure, length)
+        // and the relevant checksums. Failures are logged and flagged red.
+
+        const QR_IBAN_REGEX = /^(CH|LI)[0-9]{2}3[01][0-9]{3}[A-Z0-9]{12}$/;
+        const BIC_REGEX = /^[A-Z]{4}[A-Z]{2}[A-Z2-9][A-NP-Z0-9](XXX|[A-WYZ0-9][A-Z0-9]{2})?$/;
+
+        function isValidIban(iban) {
+            const entry = IBAN_REGISTRY.find((e) => e[0] === iban.slice(0, 2));
+            if (!entry) return false;
+            let pattern = `^${entry[0]}[0-9]{2}`;
+            for (const [, count, type] of entry[2].matchAll(/(\d+)([nac])/g)) {
+                pattern += (type === "a" ? "[A-Z]" : type === "n" ? "[0-9]" : "[A-Z0-9]") + `{${count}}`;
+            }
+            if (!new RegExp(pattern + "$").test(iban)) return false;
+            // ISO 13616 check digits live in 02..98; 00, 01 and 99 are mod-97 twins
+            // of canonical values and pass the checksum, so reject them explicitly.
+            if (["00", "01", "99"].includes(iban.slice(2, 4))) return false;
+            if (mod97(iban.slice(4) + iban.slice(0, 4)) !== 1) return false;
+            const bban = iban.slice(4);
+            if (iban.startsWith("FR")) return bban.slice(21) === frRibKey(bban.slice(0, 5), bban.slice(5, 10), bban.slice(10, 21));
+            if (iban.startsWith("ES")) return bban.slice(8, 10) === esControl(bban.slice(0, 4), bban.slice(4, 8), bban.slice(10));
+            if (iban.startsWith("IT")) return bban[0] === itCin(bban.slice(1));
+            return true;
+        }
+
+        const isValidNormalIban = (iban) => isValidIban(iban) && !QR_IBAN_REGEX.test(iban);
+        const isValidQrIban = (iban) => isValidIban(iban) && QR_IBAN_REGEX.test(iban);
+        const isValidBic = (bic, countryCode) => BIC_REGEX.test(bic) && bic.slice(4, 6) === countryCode;
+
+        const isValidQrReference = (ref) =>
+            /^[0-9]{27}$/.test(ref) && ref[26] === mod10CheckDigit(ref.slice(0, 26));
+
+        const isValidScorReference = (ref) =>
+            /^RF(?!0[01]|99)[0-9]{2}[A-Z0-9]{1,21}$/.test(ref) && mod97(ref.slice(4) + ref.slice(0, 4)) === 1;
+
         // --- rendering ---
+
+        function valueHtml(value, isValid) {
+            const valid = isValid(value);
+            if (!valid) console.error("Generated an invalid value:", value);
+            return `<code class="value${valid ? "" : " invalid"}">${value}</code>`;
+        }
 
         function render() {
             const values = (country, qr) =>
-                Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${country.gen(qr)}</code>`).join("");
+                Array.from({ length: IBANS_PER_GROUP }, () => valueHtml(country.gen(qr), qr ? isValidQrIban : isValidNormalIban)).join("");
 
             const bics = (country) =>
-                Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${genBic(country.code)}</code>`).join("");
+                Array.from({ length: IBANS_PER_GROUP }, () => valueHtml(genBic(country.code), (bic) => isValidBic(bic, country.code))).join("");
 
             document.getElementById("iban-grid").innerHTML = countries
                 .map(
@@ -507,11 +560,11 @@
             document.getElementById("qr-iban-list").innerHTML =
                 values(countries.find((country) => country.code === "CH"), true);
 
-            const refs = (gen) =>
-                Array.from({ length: REFS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
+            const refs = (gen, isValid) =>
+                Array.from({ length: REFS_PER_GROUP }, () => valueHtml(gen(), isValid)).join("");
 
-            document.getElementById("qr-list").innerHTML = refs(genQrReference);
-            document.getElementById("scor-list").innerHTML = refs(genScorReference);
+            document.getElementById("qr-list").innerHTML = refs(genQrReference, isValidQrReference);
+            document.getElementById("scor-list").innerHTML = refs(genScorReference, isValidScorReference);
         }
 
         function genericCardHtml() {
@@ -532,11 +585,11 @@
         }
 
         function renderGenericIbans(code) {
-            const items = (gen) =>
-                Array.from({ length: IBANS_PER_GROUP }, () => `<code class="value">${gen()}</code>`).join("");
+            const items = (gen, isValid) =>
+                Array.from({ length: IBANS_PER_GROUP }, () => valueHtml(gen(), isValid)).join("");
             document.getElementById("generic-ibans").innerHTML =
-                `<div class="group-title">IBAN</div>` + items(() => genericIban(code)) +
-                `<div class="group-title">BIC/SWIFT</div>` + items(() => genBic(code));
+                `<div class="group-title">IBAN</div>` + items(() => genericIban(code), isValidNormalIban) +
+                `<div class="group-title">BIC/SWIFT</div>` + items(() => genBic(code), (bic) => isValidBic(bic, code));
         }
 
         async function copyText(text) {
