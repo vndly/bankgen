@@ -823,8 +823,14 @@
             document.getElementById("qr-iban-list").innerHTML =
                 values(countries.find((country) => country.code === "CH"), true);
 
+            // Longest first. SCOR reference bodies vary in length; QR references
+            // are always 27 digits, so for those the sort is a no-op (it is
+            // stable, so they keep the order they were generated in).
             const refs = (gen, isValid) =>
-                Array.from({ length: REFS_PER_GROUP }, () => valueHtml(gen(), isValid)).join("");
+                Array.from({ length: REFS_PER_GROUP }, () => gen())
+                    .sort((a, b) => b.length - a.length)
+                    .map((ref) => valueHtml(ref, isValid))
+                    .join("");
 
             document.getElementById("qr-list").innerHTML = refs(genQrReference, isValidQrReference);
             document.getElementById("scor-list").innerHTML = refs(genScorReference, isValidScorReference);
