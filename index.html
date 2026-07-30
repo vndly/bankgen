@@ -92,7 +92,6 @@
         }
 
         .group-title {
-            display: block;
             margin: 10px 0 4px;
             text-align: center;
             font-size: 10.5px;
@@ -136,10 +135,25 @@
             color: #b42318;
         }
 
+        /* Label column plus input column, so every input shares one left edge
+           however long its label is. */
+        .validator-grid {
+            display: grid;
+            grid-template-columns: max-content max-content;
+            align-items: center;
+            gap: 8px 10px;
+        }
+
+        /* Reuses .group-title's type tokens; declared after it so the centering
+           and vertical margins it sets for stacked titles are overridden here. */
+        .validator-label {
+            margin: 0;
+            text-align: right;
+        }
+
         .validator-field {
             position: relative;
             width: fit-content;
-            margin: 0 auto;
         }
 
         /* Wide enough for the longest IBAN in the registry (RU, 33 characters);
@@ -751,15 +765,16 @@
         ];
 
         function validatorFieldsHtml() {
-            return VALIDATOR_FIELDS.map(
+            const rows = VALIDATOR_FIELDS.map(
                 ({ id, label }) => `
-      <label class="group-title" for="${id}">${label}</label>
-      <div class="validator-field">
-        <input id="${id}" class="validator-input" type="text" spellcheck="false"
-          autocomplete="off" autocapitalize="off">
-        <span class="validator-status" aria-hidden="true"></span>
-      </div>`
+        <label class="group-title validator-label" for="${id}">${label}</label>
+        <div class="validator-field">
+          <input id="${id}" class="validator-input" type="text" spellcheck="false"
+            autocomplete="off" autocapitalize="off">
+          <span class="validator-status" aria-hidden="true"></span>
+        </div>`
             ).join("");
+            return `<div class="validator-grid">${rows}\n      </div>`;
         }
 
         // An empty field has no verdict: neutral border, no marker.
