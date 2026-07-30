@@ -180,8 +180,8 @@
             border-color: #b42318;
         }
 
-        /* Anchored outside the input like .value.copied::after, so the verdict
-           appearing never shifts the field. */
+        /* The verdict glyph, drawn the same way as the copy indicator: anchored
+           outside the input so appearing never shifts the field. */
         .validator-status {
             position: absolute;
             top: 50%;
@@ -189,6 +189,16 @@
             transform: translateY(-50%);
             font-size: 14px;
             line-height: 1;
+        }
+
+        .validator-input.valid + .validator-status::after {
+            content: "✓";
+            color: #12b76a;
+        }
+
+        .validator-input.invalid + .validator-status::after {
+            content: "✗";
+            color: #b42318;
         }
 
         #toast {
@@ -787,7 +797,6 @@
             input.classList.toggle("invalid", valid === false);
             if (valid === null) input.removeAttribute("aria-invalid");
             else input.setAttribute("aria-invalid", String(!valid));
-            input.nextElementSibling.textContent = valid === null ? "" : valid ? "✅" : "❌";
         }
 
         // --- rendering ---
