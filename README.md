@@ -1,3 +1,3 @@
 # Bankgen
 
-Randomly generated banking data
+Validation and random generation of banking data
