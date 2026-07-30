@@ -15,6 +15,7 @@ const api = eval(
     `;({
     genericIban, countries, IBAN_REGISTRY, genBic, genQrReference, genScorReference,
     isValidIban, isValidNormalIban, isValidQrIban, isValidBic, isValidQrReference, isValidScorReference,
+    normalize, VALIDATOR_FIELDS,
 })`,
 );
 
@@ -333,9 +334,90 @@ for (let i = 0; i < 5000; i++) {
   assert(api.isValidScorReference(ref), `SCOR page validator: ${ref}`);
 }
 
+// --- validator inputs: normalization and the field-to-validator mapping ---
+
+// Published fixtures in printed form, grouped exactly as they appear on paper.
+const PRINTED_IBAN = "CH58 0079 1123 0008 8901 2"; // IID 00791, a normal IBAN
+const PRINTED_QR_IBAN = "CH44 3199 9123 0008 8901 2"; // IID 31999, a QR-IBAN
+const PRINTED_QRR = "21 00000 00003 13947 14300 09017";
+const PRINTED_SCOR = "RF18 5390 0754 7034";
+
+assert(
+  api.normalize(PRINTED_IBAN) === "CH5800791123000889012",
+  "normalize: grouped IBAN",
+);
+assert(
+  api.normalize(" ch58\t0079\n1123 0008 8901 2 ") === "CH5800791123000889012",
+  "normalize: mixed case, tabs, newlines and padding",
+);
+assert(
+  api.normalize(PRINTED_QRR) === "210000000003139471430009017",
+  "normalize: grouped QR reference",
+);
+assert(api.normalize("") === "", "normalize: empty stays empty");
+assert(api.normalize("   ") === "", "normalize: whitespace-only becomes empty");
+
+assert(
+  api.VALIDATOR_FIELDS.map((entry) => entry.id).join(",") ===
+    "v-iban,v-qr-iban,v-bic,v-qr-reference,v-scor-reference",
+  "validator field ids",
+);
+// Each field as the page uses it: its validator applied to a normalized value.
+const field = (id) => {
+  const entry = api.VALIDATOR_FIELDS.find((e) => e.id === id);
+  return (value) => entry.isValid(api.normalize(value));
+};
+
+const ibanField = field("v-iban");
+assert(ibanField(PRINTED_IBAN), "IBAN field: printed CH IBAN accepted");
+assert(ibanField(PRINTED_QR_IBAN), "IBAN field: a QR-IBAN is a valid IBAN too");
+assert(
+  !ibanField("CH58 0079 1123 0008 8901 3"),
+  "IBAN field: bad checksum rejected",
+);
+assert(!ibanField(PRINTED_SCOR), "IBAN field: SCOR reference rejected");
+
+const qrIbanField = field("v-qr-iban");
+assert(qrIbanField(PRINTED_QR_IBAN), "QR-IBAN field: printed QR-IBAN accepted");
+assert(!qrIbanField(PRINTED_IBAN), "QR-IBAN field: normal CH IBAN rejected");
+assert(
+  !qrIbanField("CH44 3199 9123 0008 8901 3"),
+  "QR-IBAN field: bad checksum rejected",
+);
+
+const bicField = field("v-bic");
+assert(bicField("ubswchzh80a"), "BIC field: lowercase real BIC accepted");
+assert(bicField("DEUTDEFF"), "BIC field: 8-character BIC accepted");
+assert(bicField("BOFAUS3N"), "BIC field: non-IBAN-country BIC accepted");
+assert(
+  !bicField("ABCDCHAO"),
+  "BIC field: letter O as 2nd location char rejected",
+);
+assert(!bicField("ABCDCH0A"), "BIC field: 0 as 1st location char rejected");
+// Structure only by design: nothing looks the country code up, so a well-formed
+// BIC naming a country that does not exist still passes.
+assert(
+  bicField("ABCDZZ2X"),
+  "BIC field: unknown country code accepted (structure only)",
+);
+
+const qrrField = field("v-qr-reference");
+assert(qrrField(PRINTED_QRR), "QR reference field: printed QRR accepted");
+assert(
+  !qrrField("21 00000 00003 13947 14300 09018"),
+  "QR reference field: bad check digit rejected",
+);
+assert(!qrrField(PRINTED_SCOR), "QR reference field: SCOR reference rejected");
+
+const scorField = field("v-scor-reference");
+assert(scorField(PRINTED_SCOR), "SCOR field: printed SCOR accepted");
+assert(scorField("rf18 5390 0754 7034"), "SCOR field: lowercase SCOR accepted");
+assert(!scorField("RF18 5390 0754 7035"), "SCOR field: bad checksum rejected");
+assert(!scorField(PRINTED_QRR), "SCOR field: QR reference rejected");
+
 if (failures === 0) {
   console.log(
-    `PASS: ${checks} checks (${api.IBAN_REGISTRY.length} countries x ${N} IBANs, 3000 QR-IBANs, 5000 BICs, 2x5000 references, fixtures)`,
+    `PASS: ${checks} checks (${api.IBAN_REGISTRY.length} countries x ${N} IBANs, 3000 QR-IBANs, 5000 BICs, 2x5000 references, fixtures, validator inputs)`,
   );
 } else {
   console.error(`${failures}/${checks} checks failed`);
