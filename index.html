@@ -8,8 +8,38 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>">
     <style>
+        /* Every colour in the sheet comes from a token here, so the dark theme is
+           a matter of redefining the tokens rather than duplicating rules. The
+           light values are the palette the app has always used. */
         :root {
-            color-scheme: light;
+            color-scheme: light dark;
+            --bg: #f5f6f8;
+            --fg: #1c2330;
+            --surface: #fff;
+            --border: #e4e7ec;
+            --muted: #98a2b3;
+            --hover: #eef4ff;
+            --success: #12b76a;
+            --danger: #b42318;
+            --danger-bg: #fee4e2;
+            --toast-bg: #1c2330;
+            --toast-fg: #fff;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #12161d;
+                --fg: #e4e7ec;
+                --surface: #1c2330;
+                --border: #2c3444;
+                --muted: #8794a8;
+                --hover: #232d40;
+                --success: #32d583;
+                --danger: #fda29b;
+                --danger-bg: #55160c;
+                --toast-bg: #333d4f;
+                --toast-fg: #f5f6f8;
+            }
         }
 
         * {
@@ -22,8 +52,8 @@
             padding-left: 24px;
             padding-right: 24px;
             font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-            background: #f5f6f8;
-            color: #1c2330;
+            background: var(--bg);
+            color: var(--fg);
         }
 
         #ibans {
@@ -45,8 +75,8 @@
         }
 
         .card {
-            background: #fff;
-            border: 1px solid #e4e7ec;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 8px;
             padding: 10px 16px;
         }
@@ -86,9 +116,9 @@
             width: 100%;
             height: 100%;
             padding: 4px 6px;
-            border: 1px solid #e4e7ec;
+            border: 1px solid var(--border);
             border-radius: 6px;
-            background: #fff;
+            background: var(--surface);
             font-size: 13px;
             color: inherit;
         }
@@ -100,7 +130,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.6px;
-            color: #98a2b3;
+            color: var(--muted);
         }
 
         .value {
@@ -118,23 +148,23 @@
         }
 
         .value:hover {
-            background: #eef4ff;
+            background: var(--hover);
         }
 
         .value.copied {
-            color: #98a2b3;
+            color: var(--muted);
         }
 
         .value.copied::after {
             content: "✓";
             position: absolute;
             left: calc(100% + 6px);
-            color: #12b76a;
+            color: var(--success);
         }
 
         .value.invalid {
-            background: #fee4e2;
-            color: #b42318;
+            background: var(--danger-bg);
+            color: var(--danger);
         }
 
         /* Label column plus input column, so every input shares one left edge
@@ -163,9 +193,9 @@
         .validator-input {
             width: calc(33ch + 18px);
             padding: 6px 8px;
-            border: 1px solid #e4e7ec;
+            border: 1px solid var(--border);
             border-radius: 6px;
-            background: #fff;
+            background: var(--surface);
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             font-size: 14px;
             color: inherit;
@@ -173,11 +203,11 @@
         }
 
         .validator-input.valid {
-            border-color: #12b76a;
+            border-color: var(--success);
         }
 
         .validator-input.invalid {
-            border-color: #b42318;
+            border-color: var(--danger);
         }
 
         /* The verdict glyph, drawn the same way as the copy indicator: anchored
@@ -193,12 +223,12 @@
 
         .validator-input.valid + .validator-status::after {
             content: "✓";
-            color: #12b76a;
+            color: var(--success);
         }
 
         .validator-input.invalid + .validator-status::after {
             content: "✗";
-            color: #b42318;
+            color: var(--danger);
         }
 
         #toast {
@@ -208,8 +238,8 @@
             transform: translate(-50%, 8px);
             padding: 8px 14px;
             border-radius: 6px;
-            background: #1c2330;
-            color: #fff;
+            background: var(--toast-bg);
+            color: var(--toast-fg);
             font-size: 12.5px;
             opacity: 0;
             pointer-events: none;
